@@ -12,24 +12,24 @@ import (
 	"github.com/hashicorp/terraform/terraform"
 )
 
-func TestAccAWSSSMMaintenanceWindowTarget_basic(t *testing.T) {
+func TestAccAWSSSMMaintenanceWindowTask_basic(t *testing.T) {
 	name := acctest.RandString(10)
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckAWSSSMMaintenanceWindowTargetDestroy,
+		CheckDestroy: testAccCheckAWSSSMMaintenanceWindowTaskDestroy,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccAWSSSMMaintenanceWindowTargetBasicConfig(name),
+				Config: testAccAWSSSMMaintenanceWindowTaskBasicConfig(name),
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckAWSSSMMaintenanceWindowTargetExists("aws_ssm_maintenance_window_target.target"),
+					testAccCheckAWSSSMMaintenanceWindowTaskExists("aws_ssm_maintenance_window_task.target"),
 				),
 			},
 		},
 	})
 }
 
-func testAccCheckAWSSSMMaintenanceWindowTargetExists(n string) resource.TestCheckFunc {
+func testAccCheckAWSSSMMaintenanceWindowTaskExists(n string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
@@ -37,35 +37,29 @@ func testAccCheckAWSSSMMaintenanceWindowTargetExists(n string) resource.TestChec
 		}
 
 		if rs.Primary.ID == "" {
-			return fmt.Errorf("No SSM Maintenance Window Target Window ID is set")
+			return fmt.Errorf("No SSM Maintenance Window Task Window ID is set")
 		}
 
 		conn := testAccProvider.Meta().(*AWSClient).ssmconn
 
-		resp, err := conn.DescribeMaintenanceWindowTargets(&ssm.DescribeMaintenanceWindowTargetsInput{
+		resp, err := conn.DescribeMaintenanceWindowTasks(&ssm.DescribeMaintenanceWindowTasksInput{
 			WindowId: aws.String(rs.Primary.Attributes["window_id"]),
-			Filters: []*ssm.MaintenanceWindowFilter{
-				{
-					Key:    aws.String("WindowTargetId"),
-					Values: []*string{aws.String(rs.Primary.ID)},
-				},
-			},
 		})
 		if err != nil {
 			return err
 		}
 
-		for _, i := range resp.Targets {
-			if *i.WindowTargetId == rs.Primary.ID {
+		for _, i := range resp.Tasks {
+			if *i.WindowTaskId == rs.Primary.ID {
 				return nil
 			}
 		}
 
-		return fmt.Errorf("No AWS SSM Maintenance window target found")
+		return fmt.Errorf("No AWS SSM Maintenance window task found")
 	}
 }
 
-func testAccCheckAWSSSMMaintenanceWindowTargetDestroy(s *terraform.State) error {
+func testAccCheckAWSSSMMaintenanceWindowTaskDestroy(s *terraform.State) error {
 	conn := testAccProvider.Meta().(*AWSClient).ssmconn
 
 	for _, rs := range s.RootModule().Resources {
@@ -73,14 +67,8 @@ func testAccCheckAWSSSMMaintenanceWindowTargetDestroy(s *terraform.State) error 
 			continue
 		}
 
-		out, err := conn.DescribeMaintenanceWindowTargets(&ssm.DescribeMaintenanceWindowTargetsInput{
+		out, err := conn.DescribeMaintenanceWindowTasks(&ssm.DescribeMaintenanceWindowTasksInput{
 			WindowId: aws.String(rs.Primary.Attributes["window_id"]),
-			Filters: []*ssm.MaintenanceWindowFilter{
-				{
-					Key:    aws.String("WindowTargetId"),
-					Values: []*string{aws.String(rs.Primary.ID)},
-				},
-			},
 		})
 
 		if err != nil {
@@ -91,8 +79,8 @@ func testAccCheckAWSSSMMaintenanceWindowTargetDestroy(s *terraform.State) error 
 			return err
 		}
 
-		if len(out.Targets) > 0 {
-			return fmt.Errorf("Expected AWS SSM Maintenance Target to be gone, but was still found")
+		if len(out.Tasks) > 0 {
+			return fmt.Errorf("Expected AWS SSM Maintenance Task to be gone, but was still found")
 		}
 
 		return nil
@@ -101,7 +89,7 @@ func testAccCheckAWSSSMMaintenanceWindowTargetDestroy(s *terraform.State) error 
 	return nil
 }
 
-func testAccAWSSSMMaintenanceWindowTargetBasicConfig(rName string) string {
+func testAccAWSSSMMaintenanceWindowTaskBasicConfig(rName string) string {
 	return fmt.Sprintf(`
 resource "aws_ssm_maintenance_window" "foo" {
   name = "maintenance-window-%s"
@@ -110,13 +98,25 @@ resource "aws_ssm_maintenance_window" "foo" {
   cutoff = 1
 }
 
-resource "aws_ssm_maintenance_window_target" "target" {
+resource "aws_ssm_maintenance_window_task" "target" {
   window_id = "${aws_ssm_maintenance_window.foo.id}"
-  resource_type = "INSTANCE"
+  task_type = "RUN_COMMAND"
+  task_arn = "AWS-RunShellScript"
+  priority = 1
+  service_role_arn = "arn:aws:iam::187416307283:role/service-role/AWS_Events_Invoke_Run_Command_112316643"
+  max_concurrency = "2"
+  max_errors = "1"
   targets {
-    key = "tag:Name"
-    values = ["acceptance_test"]
+    key = "InstanceIds"
+    values = ["${aws_instance.foo.id}"]
   }
 }
+
+resource "aws_instance" "foo" {
+  ami = "ami-4fccb37f"
+
+  instance_type = "m1.small"
+}
+
 `, rName)
 }
